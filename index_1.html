@@ -1,0 +1,577 @@
+<title>Preview & E-sign Prototype</title>
+<style>
+  /* ---- design plan ----
+     Layout: a phone-width column centered on the page, mimicking the
+     mobile screen this prototype is meant to be viewed as — fixed
+     header/progress chrome at top, fixed footer at bottom, scrolling
+     body between them.
+     Color: SBI Life's own brand tokens (navy + pink), not an invented
+     palette — this prototype's job is to look like the real product,
+     which only has a light theme, so this page deliberately stays
+     light-only rather than following the viewer's system theme.
+     Type: system UI stack, since this mirrors an existing product's
+     own type choices rather than introducing a new voice.
+  */
+  :root {
+    --navy: #280071;
+    --pink: #d60d47;
+    --border: #e6e6e6;
+    --gray: #6f6f6f;
+    --bg: #ffffff;
+    --panel: #f4f2f8;
+    --banner-bg: #e6f6fb;
+    --banner-border: #1aa6c4;
+    --error: #d32f2f;
+    --success: #2e7d32;
+    --fg: #111111;
+    --outer-bg: #ece9f2;
+    color-scheme: light;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--outer-bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+    padding-block: 24px;
+  }
+
+  .phone {
+    width: 100%;
+    max-width: 430px;
+    min-height: min(844px, calc(100vh - 48px));
+    background: var(--bg);
+    border-radius: 28px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.25);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  .screen { display: flex; flex-direction: column; height: min(844px, calc(100vh - 48px)); }
+  .screen[hidden] { display: none; }
+
+  /* ---- chrome shared by both screens ---- */
+  .topchrome { flex: none; border-bottom: 1px solid var(--border); }
+  .product-row { display: flex; align-items: flex-start; justify-content: space-between; padding: 14px 16px 10px; gap: 10px; }
+  .product-name { font-size: 15px; font-weight: 800; line-height: 1.3; color: var(--navy); }
+  .product-name .brand { color: var(--pink); }
+  .product-uin { font-size: 11px; color: var(--gray); margin-top: 2px; }
+  .pill-btn {
+    flex: none; border: 1px solid var(--navy); background: var(--bg); border-radius: 20px;
+    padding: 7px 14px; font-size: 12.5px; font-weight: 700; color: var(--navy); cursor: pointer;
+  }
+  .progress-row { background: var(--panel); padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; }
+  .progress-label, .progress-pct { font-size: 12.5px; font-weight: 700; color: var(--navy); }
+  .progress-track { height: 4px; border-radius: 2px; background: var(--border); margin: 0 16px 12px; overflow: hidden; }
+  .progress-fill { height: 100%; width: 70%; background: linear-gradient(90deg, var(--pink), var(--navy)); }
+  .steps { display: flex; gap: 8px; padding: 10px 16px; overflow-x: auto; }
+  .step {
+    flex: none; border-radius: 20px; padding: 7px 12px; font-size: 12px; font-weight: 500;
+    white-space: nowrap; background: var(--panel); color: var(--gray);
+  }
+  .step[data-active="true"] { border: 1px solid var(--navy); background: var(--bg); color: var(--navy); font-weight: 700; }
+
+  /* scrollbar-gutter reserves the scrollbar's width up front, so opening
+     an accordion that pushes content past the viewport doesn't shove
+     everything sideways the instant a scrollbar appears. */
+  .body { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; -webkit-overflow-scrolling: touch; padding: 16px; }
+
+  .banner {
+    display: flex; gap: 10px; background: var(--banner-bg); border-left: 3px solid var(--banner-border);
+    border-radius: 6px; padding: 12px 14px; font-size: 13px; line-height: 1.45; margin-bottom: 20px;
+  }
+
+  .person-heading { font-size: 19px; font-weight: 800; color: var(--navy); line-height: 1.3; margin: 0 0 4px; }
+  .person-subtext { font-size: 13px; color: var(--gray); margin: 0 0 14px; }
+  .person-group { margin-bottom: 24px; }
+
+  /* ---- accordion ---- */
+  .acc { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 12px; }
+  .acc-head {
+    width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 14px 16px; background: var(--panel); border: none; text-align: left; cursor: pointer; color: var(--navy);
+    font: inherit;
+  }
+  .acc[data-open="true"] > .acc-head { background: var(--navy); color: #fff; }
+  .acc-title-wrap { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .acc-title { font-size: 15px; font-weight: 700; color: inherit; line-height: 1.3; }
+  .acc-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+  .acc-edit { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; color: inherit; cursor: pointer; }
+  .acc-edit[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+  .acc-chevron { width: 10px; height: 10px; flex: none; margin-left: 10px; transition: transform .2s ease; }
+  .acc[data-open="true"] .acc-chevron { transform: rotate(180deg); }
+
+  /* Smooth open/close: the body stays mounted and animates via a
+     0fr → 1fr grid row instead of popping in/out instantly — this is
+     what removes the abrupt page-height jump on toggle. */
+  .acc-body-wrap { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .28s ease; }
+  .acc[data-open="true"] .acc-body-wrap { grid-template-rows: 1fr; }
+  .acc-body-inner { overflow: hidden; min-height: 0; }
+  .acc-body { padding: 16px; background: var(--bg); border-top: 1px solid var(--border); }
+
+  .field-groups { display: flex; flex-direction: column; gap: 18px; }
+  .field-group-title { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .field-group-title span:first-child { font-size: 11px; font-weight: 800; letter-spacing: .03em; color: var(--navy); text-transform: uppercase; white-space: nowrap; }
+  .field-group-rule { flex: 1; height: 1px; background: var(--border); }
+  .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 12px; }
+  .field-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .field-cell.full { grid-column: 1 / -1; }
+  .field-label { font-size: 11px; color: var(--gray); line-height: 1.3; }
+  .field-value { font-size: 13.5px; font-weight: 500; color: var(--fg); line-height: 1.35; }
+
+  .declaration { font-size: 12.5px; color: var(--navy); font-weight: 700; line-height: 1.5; margin: 4px 0 14px; }
+  .alert { background: var(--banner-bg); border-left: 3px solid var(--banner-border); border-radius: 6px; padding: 12px 14px; font-size: 13px; font-weight: 600; line-height: 1.45; margin-bottom: 20px; }
+
+  .esign-card { border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .esign-title { font-size: 15px; font-weight: 700; color: var(--navy); margin: 0 0 14px; }
+  .esign-form { display: flex; flex-direction: column; gap: 14px; }
+  .input-wrap { position: relative; }
+  .float-label { position: absolute; top: -8px; left: 10px; background: var(--bg); padding: 0 4px; font-size: 11px; color: var(--gray); }
+  .req { color: var(--pink); margin-left: 2px; }
+  .esign-input {
+    width: 100%; height: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 14px; color: var(--fg); background: var(--bg); font-family: inherit;
+  }
+  .esign-input:focus { outline: none; border-color: var(--navy); }
+  .esign-input[data-error="true"] { border-color: var(--error); }
+  .field-error { display: block; font-size: 11px; color: var(--error); margin-top: 4px; }
+  .consent-label { font-size: 13px; font-weight: 700; color: var(--fg); margin: 0; }
+  .consent-row { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; font-size: 12px; color: var(--gray); line-height: 1.4; }
+  .consent-row input { width: 16px; height: 16px; margin-top: 1px; accent-color: var(--navy); flex-shrink: 0; }
+  .block-error { font-size: 12px; font-weight: 700; color: var(--error); margin: 2px 0 0; }
+  .verified { font-size: 13px; font-weight: 700; color: var(--success); margin: 10px 0 0; }
+
+  /* Fixed footer: real "Mobile Footer" component is two stacked rows —
+     an Action Row (Got Questions) above a divider, then a Bottom
+     Navigation Bar (Back + Submit). Got Questions is NOT scrolling
+     content; it lives here, or it crowds the Back button. */
+  .footer { flex: none; background: var(--bg); }
+  .footer-action-row { padding: 6px 16px; display: flex; align-items: center; }
+  .questions-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--navy); background: var(--bg); border-radius: 20px;
+    padding: 8px 16px; font-size: 13px; font-weight: 700; color: var(--navy); cursor: pointer;
+  }
+  .footer-divider { height: 1px; background: var(--border); }
+  .footer-nav-row { padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .back-link { border: none; background: none; padding: 0; font-size: 13px; font-weight: 700; color: var(--navy); cursor: pointer; }
+  .submit-btn { border: none; border-radius: 24px; background: var(--navy); color: #fff; font-size: 15px; font-weight: 700; padding: 13px 32px; cursor: pointer; }
+
+  /* ---- Policyholder Expanded screen ---- */
+  .pe-header { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .pe-header-left { display: flex; align-items: center; gap: 10px; }
+  .pe-back { border: none; background: none; padding: 4px; font-size: 20px; color: var(--navy); cursor: pointer; }
+  .pe-title { font-size: 16px; font-weight: 700; color: var(--fg); }
+  .pe-section-title { font-size: 18px; font-weight: 700; color: var(--navy); margin: 0 0 14px; }
+  .sub-card { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
+  .sub-card-head { display: flex; align-items: center; justify-content: space-between; background: var(--panel); padding: 10px 14px; }
+  .sub-card-title { font-size: 12px; font-weight: 700; color: var(--navy); letter-spacing: .02em; }
+  .sub-card-edit, .flat-row-edit { font-size: 12px; font-weight: 600; color: var(--navy); opacity: .55; cursor: default; }
+  .sub-card-body { padding: 14px; }
+  .pe-divider { height: 1px; background: var(--border); margin: 20px 0; }
+  .flat-row { display: flex; align-items: center; justify-content: space-between; border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 12px; background: var(--panel); }
+  .flat-row-title { font-size: 14px; font-weight: 700; color: var(--fg); }
+  .flat-row-actions { display: flex; align-items: center; gap: 14px; }
+
+  .toast {
+    position: absolute; left: 16px; right: 16px; bottom: 84px;
+    background: var(--navy); color: #fff; border-radius: 8px; padding: 12px 16px;
+    font-size: 13px; font-weight: 600; text-align: center; box-shadow: 0 6px 20px rgba(0,0,0,.3);
+    opacity: 0; pointer-events: none; transition: opacity .2s ease;
+  }
+  .toast.show { opacity: 1; }
+</style>
+
+<div class="phone">
+  <!-- ============ SCREEN 1: Preview & E-sign ============ -->
+  <div class="screen" id="screen-preview">
+    <!-- TOP CHROME (fixed): product name/UIN + Save & Exit, journey
+         progress bar, then the scrollable stage strip (filled by
+         renderSteps() below). -->
+    <div class="topchrome">
+      <div class="product-row">
+        <div>
+          <div class="product-name"><span class="brand">SBI Life</span> - Smart Elite Plus</div>
+          <div class="product-uin">UIN: 111L150V01</div>
+        </div>
+        <button type="button" class="pill-btn" onclick="toast('Save & Exit — not wired up in this prototype')">Save &amp; Exit</button>
+      </div>
+      <div class="progress-row"><span class="progress-label">Your Proposal Journey</span><span class="progress-pct">70% Completed</span></div>
+      <div class="progress-track"><div class="progress-fill"></div></div>
+      <div class="steps" id="steps-row"></div>
+    </div>
+
+    <!-- SCROLLABLE BODY — the only piece that scrolls; filled by
+         renderPreview() below (banner, both people's accordions,
+         declaration + alert, both e-sign cards). -->
+    <div class="body" id="preview-body"></div>
+
+    <!-- FIXED FOOTER — real "Mobile Footer" component is 2 stacked
+         rows: Action Row (Got Questions) above a divider, then the
+         Bottom Nav Row (Back/Submit). Got Questions lives here, NOT in
+         the scrolling body, or it crowds the Back button. -->
+    <div class="footer">
+      <div class="footer-action-row">
+        <button type="button" class="questions-btn" onclick="toast('Got Questions? — not wired up in this prototype')">📞 Got Questions?</button>
+      </div>
+      <div class="footer-divider"></div>
+      <div class="footer-nav-row">
+        <button type="button" class="back-link" onclick="toast('Back — not wired up in this prototype')">‹ Back</button>
+        <button type="button" class="submit-btn" onclick="onSubmit()">Submit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SCREEN 2: Policyholder Expanded ============ -->
+  <div class="screen" id="screen-expanded" hidden>
+    <div class="pe-header">
+      <div class="pe-header-left">
+        <button type="button" class="pe-back" onclick="showScreen('preview')" aria-label="Back to Preview">‹</button>
+        <span class="pe-title">Policyholder Details</span>
+      </div>
+      <button type="button" class="pill-btn" onclick="showScreen('preview')">Save &amp; Exit</button>
+    </div>
+    <div class="body">
+      <p class="pe-section-title">Policyholder Details</p>
+      <div id="pe-subcards"></div>
+      <div class="pe-divider"></div>
+      <div class="flat-row"><span class="flat-row-title">Health &amp; Lifestyle Details</span><span class="flat-row-actions"><span class="flat-row-edit">Edit</span>⌄</span></div>
+      <div class="flat-row"><span class="flat-row-title">Nominee Details</span><span class="flat-row-actions"><span class="flat-row-edit">Edit</span>⌄</span></div>
+      <div class="flat-row"><span class="flat-row-title">Existing Insurance</span><span class="flat-row-actions"><span class="flat-row-edit">Edit</span>⌄</span></div>
+      <div class="flat-row"><span class="flat-row-title">Bank Details</span><span class="flat-row-actions"><span class="flat-row-edit">Edit</span>⌄</span></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+/* ================================================================
+   Preview & E-sign — interactive prototype (mirrors the React/TSX
+   version delivered alongside this). Same content and interaction
+   rules, in plain JS so it runs here with no build step:
+   - free, independent accordions per person (open state is a Set)
+   - Edit always routes to the Policyholder Expanded screen
+   - Nominee Edit disabled (nominee == proposer)
+   - Submit validates both E-sign blocks; incomplete ones get the
+     design's own red-border + inline-message treatment and the page
+     scrolls to the first one
+================================================================ */
+
+// ---- SECTIONS: the 5 accordions rendered under EACH person ----
+const SECTIONS = [
+  { key: "policyholder", title: "Policyholder Details" },
+  { key: "health", title: "Health & Lifestyle Details" },
+  { key: "insurance", title: "Existing Insurance" },
+  { key: "nominee", title: "Nominee Details" },
+  { key: "bank", title: "Bank Details" },
+];
+// Demo flag driving the "nominee = proposer, Edit disabled" state.
+const NOMINEE_EQUALS_PROPOSER = true;
+
+// ---- JOURNEY_STEPS: the scrollable stage strip at the top ----
+// Every stage (not just neighbours of the active one) so the strip
+// bleeds off both edges like the real "Stages" component, instead of
+// looking like a tidy, fully-visible row. Steps after ACTIVE_STEP get
+// a 🔒, the active one gets a ✎.
+const JOURNEY_STEPS = ["CLP", "Quote", "Riders", "KYC", "Proposal Form", "Bank Details", "Preview & E-sign", "Document Upload", "Video Verification", "Medical Test"];
+const ACTIVE_STEP = "Preview & E-sign"; // change this + the array order to move the "active" pill elsewhere
+
+// Builds the stage strip once and scrolls the active pill into the
+// middle of it (so it bleeds off both edges on load, matching Figma).
+function renderSteps() {
+  const row = document.getElementById("steps-row");
+  row.innerHTML = "";
+  const activeIdx = JOURNEY_STEPS.indexOf(ACTIVE_STEP);
+  JOURNEY_STEPS.forEach((step, i) => {
+    const active = step === ACTIVE_STEP;
+    const upcoming = i > activeIdx;
+    const span = el("span", { class: "step", "data-active": active ? "true" : undefined }, [
+      (active ? "✎ " : upcoming ? "🔒 " : "") + step,
+    ]);
+    row.appendChild(span);
+    if (active) {
+      requestAnimationFrame(() => span.scrollIntoView({ inline: "center", block: "nearest" }));
+    }
+  });
+}
+
+// ---- PEOPLE: drives BOTH the accordion groups and the e-sign cards ----
+// Add a 3rd entry here and it renders automatically in both places.
+const PEOPLE = [
+  { name: "Kallara Chithra", role: "Proposer", dob: "26/11/1994", maskedMobile: "+91 *******889", sub: "For the person buying this policy." },
+  { name: "Ananthapadmanabhan Swaminathan", role: "Life Assured", dob: "14/03/1996", maskedMobile: "+91 *******889", sub: "For the person whose life is insured under this policy." },
+];
+
+// ---- PLACEHOLDER FIELD DATA ----
+// Same dummy field set reused for every accordion section, for both
+// people — swap the return value for real data later, keeping the
+// {title, fields:[{label,value,full?}]}[] shape.
+function placeholderGroups(personName, dob) {
+  const parts = personName.split(" ");
+  const first = parts[0];
+  const last = parts.length > 1 ? parts[parts.length - 1] : "";
+  const middle = parts.slice(1, -1).join(" ");
+  return [
+    { title: "PERSONAL DETAILS", fields: [
+      { label: "Salutation", value: "Mr." },
+      { label: "First Name", value: first },
+      { label: "Middle Name", value: middle || "—" },
+      { label: "Last Name", value: last },
+      { label: "Gender", value: "Male" },
+      { label: "Date of Birth", value: dob },
+      { label: 'Are you a "Politically Exposed Person" (PEP) or a close relative of PEP?', value: "No", full: true },
+      { label: "Do you have any criminal proceedings initiated against you?", value: "No", full: true },
+    ]},
+    { title: "COMMUNICATION DETAILS", fields: [
+      { label: "Mobile", value: "+91 98765 43210" },
+      { label: "Email ID", value: "kallarac@gmail.com" },
+    ]},
+    { title: "ADDRESS DETAILS", fields: [
+      { label: "Permanent Address", value: "B 101 / Koyna CHS, Gokul Complex, Shantivan, Opp. HDFC Bank, Near Sanjay Gandhi National Park, Mumbai - 400062", full: true },
+    ]},
+  ];
+}
+
+// ---- STATE ----
+// open[key] where key = "<personIdx>-<sectionKey>" (e.g. "0-nominee") —
+// each person's accordions are independent, any number open at once.
+const open = { "0-policyholder": true };
+// One e-sign entry per person (index matches PEOPLE above).
+const signState = [
+  { place: "Mumbai", date: "", consent: false, touched: false },
+  { place: "Mumbai", date: "", consent: false, touched: false },
+];
+
+// ---- el(): tiny DOM-builder helper used everywhere below instead of
+// innerHTML strings, so this stays readable/editable like JSX. ----
+function el(tag, attrs, children) {
+  const e = document.createElement(tag);
+  for (const k in (attrs || {})) {
+    const v = attrs[k];
+    if (v === undefined || v === null || v === false) continue;
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "html") e.innerHTML = v;
+    else e.setAttribute(k, v);
+  }
+  (children || []).forEach((c) => { if (c) e.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+  return e;
+}
+
+// Renders the 2-column field grid (full-width rows for long
+// labels/answers) inside an EXPANDED accordion body.
+function fieldGroups(groups) {
+  const wrap = el("div", { class: "field-groups" });
+  groups.forEach((g) => {
+    const titleRow = el("div", { class: "field-group-title" }, [
+      el("span", {}, [g.title]),
+      el("span", { class: "field-group-rule" }),
+    ]);
+    const grid = el("div", { class: "field-grid" });
+    g.fields.forEach((f) => {
+      grid.appendChild(el("div", { class: "field-cell" + (f.full ? " full" : "") }, [
+        el("span", { class: "field-label" }, [f.label]),
+        el("span", { class: "field-value" }, [f.value]),
+      ]));
+    });
+    wrap.appendChild(el("div", { class: "field-group" }, [titleRow, grid]));
+  });
+  return wrap;
+}
+
+// Builds one accordion for one person + one SECTIONS entry — mirrors
+// Accordion.tsx: header row toggles open/close; the Edit span inside it
+// stops click propagation so Edit navigates to the Expanded screen
+// WITHOUT also toggling the accordion.
+function accordion(personIdx, section) {
+  const key = personIdx + "-" + section.key;
+  const isOpen = !!open[key];
+  const disabled = section.key === "nominee" && NOMINEE_EQUALS_PROPOSER;
+
+  const acc = el("div", { class: "acc" });
+  acc.dataset.open = isOpen ? "true" : "false";
+
+  const editSpan = el("span", {
+    class: "acc-edit",
+    "aria-disabled": disabled ? "true" : "false",
+    title: disabled ? "Nominee is the same as the Proposer, so this is set from their basic details." : "",
+    onclick: (e) => { e.stopPropagation(); if (!disabled) showScreen("expanded"); },
+  }, ["✎ Edit"]);
+
+  const chevron = el("span", { class: "acc-chevron", html: '<svg viewBox="0 0 12 8" fill="none" width="10" height="10"><path d="M1 1l5 5 5-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>' });
+
+  // Toggling flips the attribute on the EXISTING node (no full re-render),
+  // so the CSS grid-row transition below actually has something to
+  // animate between — a full renderPreview() teardown/rebuild on every
+  // click is what was causing both the abrupt jump and the page shift.
+  const head = el("button", {
+    type: "button", class: "acc-head",
+    onclick: () => {
+      open[key] = !open[key];
+      acc.dataset.open = open[key] ? "true" : "false";
+    },
+  }, [
+    el("span", { class: "acc-title-wrap" }, [
+      el("span", { class: "acc-title" }, [section.title]),
+    ]),
+    el("span", { class: "acc-actions" }, [editSpan, chevron]),
+  ]);
+
+  acc.appendChild(head);
+  {
+    // Always mounted (not conditional on isOpen) so the wrap/inner grid
+    // has content to size against and can animate smoothly either way.
+    const groups = placeholderGroups(PEOPLE[personIdx].name, PEOPLE[personIdx].dob);
+    acc.appendChild(el("div", { class: "acc-body-wrap" }, [
+      el("div", { class: "acc-body-inner" }, [
+        el("div", { class: "acc-body" }, [fieldGroups(groups)]),
+      ]),
+    ]));
+  }
+  return acc;
+}
+
+// Builds one person's "Place / Date / OTP consent" card. Checking the
+// consent checkbox IS the e-sign action (no separate OTP-entry step,
+// matching the real Figma design). entry.touched only flips true once
+// Submit is clicked, so errors don't show while still filling the form.
+function esignCard(personIdx) {
+  const p = PEOPLE[personIdx];
+  const entry = signState[personIdx];
+  const placeError = entry.touched && !entry.place.trim();
+  const dateError = entry.touched && !entry.date.trim();
+  const consentError = entry.touched && !entry.consent;
+  const incomplete = placeError || dateError || consentError;
+
+  const placeInput = el("input", {
+    class: "esign-input", value: entry.place, "data-error": placeError ? "true" : "",
+    oninput: (e) => { entry.place = e.target.value; },
+  });
+  const dateInput = el("input", {
+    class: "esign-input", placeholder: "DD/MM/YYYY", value: entry.date, "data-error": dateError ? "true" : "",
+    oninput: (e) => { entry.date = e.target.value; },
+  });
+  const consentCheckbox = el("input", {
+    type: "checkbox", onchange: (e) => { entry.consent = e.target.checked; },
+  });
+  consentCheckbox.checked = entry.consent;
+
+  const card = el("div", { class: "esign-card" }, [
+    el("p", { class: "esign-title" }, [`E-Sign for ${p.name} (${p.role})`]),
+    el("div", { class: "esign-form" }, [
+      el("div", { class: "input-wrap" }, [
+        el("span", { class: "float-label" }, ["Place of E-Signing", el("span", { class: "req" }, ["*"])]),
+        placeInput,
+        placeError ? el("span", { class: "field-error" }, ["Please enter a value"]) : null,
+      ]),
+      el("div", { class: "input-wrap" }, [
+        el("span", { class: "float-label" }, ["Date", el("span", { class: "req" }, ["*"])]),
+        dateInput,
+        dateError ? el("span", { class: "field-error" }, ["Please enter the date"]) : null,
+      ]),
+      el("p", { class: "consent-label" }, ["OTP Verification Consent"]),
+      el("label", { class: "consent-row" }, [
+        consentCheckbox,
+        el("span", {}, [`I hereby give my consent to SBI Life Insurance Company Ltd to use my Mobile Number ${p.maskedMobile}, for sending One Time Password(OTP), for authentication purposes and I hereby agree and consent that the authentication through OTP verification will be considered as my signature on the Proposal Form and that there is no need for my physical signatures on these documents once OTP based authentication is done. SBI Life Insurance Company Ltd has informed me that the OTP would be used only for processing my SBI Life application form for SBI Life - Smart Shield Plus (UIN-111NXXXV01).`]),
+      ]),
+      consentError ? el("p", { class: "block-error" }, ["⊘ Please complete the e-signature before proceeding."]) : null,
+    ]),
+    (!incomplete && entry.touched) ? el("p", { class: "verified" }, ["✓ E-signed"]) : null,
+  ]);
+  card.dataset.personIdx = personIdx;
+  return card;
+}
+
+// Rebuilds the SCROLLABLE BODY: banner → both people's accordion
+// groups → declaration + "can't be edited" alert → both e-sign cards.
+// Called on load and again from onSubmit (NOT on every accordion
+// toggle — accordion() mutates its own node directly for that, see
+// the comment above it).
+function renderPreview() {
+  const body = document.getElementById("preview-body");
+  body.innerHTML = "";
+
+  body.appendChild(el("div", { class: "banner" }, ["🎉", el("span", {}, ["You're almost there! Review your proposal details carefully before e-signing. You can edit any information that needs to be corrected."])]));
+
+  // One person-group per PEOPLE entry, each with its own 5 SECTIONS.
+  PEOPLE.forEach((p, i) => {
+    const group = el("div", { class: "person-group" }, [
+      el("p", { class: "person-heading" }, [`Preview Details for ${p.name} (${p.role})`]),
+      el("p", { class: "person-subtext" }, [p.sub]),
+    ]);
+    SECTIONS.forEach((s) => group.appendChild(accordion(i, s)));
+    body.appendChild(group);
+  });
+
+  body.appendChild(el("p", { class: "declaration" }, ["Please go through all the information thoroughly. Verifying your mobile number via OTP would mean that all the above information is correct."]));
+  body.appendChild(el("div", { class: "alert" }, ["Once you e-sign, your proposal details will be finalised and cannot be edited."]));
+
+  // One e-sign card per person.
+  PEOPLE.forEach((_, i) => body.appendChild(esignCard(i)));
+}
+
+// Submit: mark every e-sign entry "touched" (so errors become visible),
+// re-render, then either scroll to the first incomplete card, or show
+// a mock success toast if everything's filled in.
+function onSubmit() {
+  signState.forEach((e) => { e.touched = true; });
+  renderPreview();
+  const idx = signState.findIndex((e) => !e.place.trim() || !e.date.trim() || !e.consent);
+  if (idx !== -1) {
+    const card = document.querySelector(`.esign-card[data-person-idx="${idx}"]`);
+    card && card.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
+  toast("Proposal submitted (mock).");
+}
+
+// ================= SCREEN 2: Policyholder Expanded =================
+// Where "Edit" navigates to. Only Save & Exit (→ showScreen("preview"))
+// is wired up here — the per-subsection Edit pencils are decorative,
+// since this prototype only needs to prove Edit → here → back.
+
+function subCard(title) {
+  return el("div", { class: "sub-card" }, [
+    el("div", { class: "sub-card-head" }, [
+      el("span", { class: "sub-card-title" }, [title]),
+      el("span", { class: "sub-card-edit" }, ["✎ Edit"]),
+    ]),
+    el("div", { class: "sub-card-body" }, [fieldGroups(placeholderGroups(PEOPLE[0].name, PEOPLE[0].dob))]),
+  ]);
+}
+
+function renderExpanded() {
+  const wrap = document.getElementById("pe-subcards");
+  wrap.innerHTML = "";
+  ["PERSONAL DETAILS", "COMMUNICATION DETAILS", "ADDRESS DETAILS", "OCCUPATION DETAILS"].forEach((t) => wrap.appendChild(subCard(t)));
+}
+
+// ================= SCREEN SWITCHING + TOAST HELPER =================
+
+// Swaps which of the two top-level <div class="screen"> is visible —
+// this file's stand-in for a router, since there's only ever 2 screens.
+function showScreen(name) {
+  document.getElementById("screen-preview").hidden = name !== "preview";
+  document.getElementById("screen-expanded").hidden = name !== "expanded";
+}
+
+// Small bottom toast used for every "not wired up in this prototype"
+// mock action (Save & Exit, Got Questions, etc).
+let toastTimer;
+function toast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+// ---- initial render, on page load ----
+renderSteps();
+renderPreview();
+renderExpanded();
+</script>
